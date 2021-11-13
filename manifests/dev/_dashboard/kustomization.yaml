@@ -1,0 +1,18 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base/_dashboard
+
+patches:
+  - path: deployment-patch.yaml
+    target:
+      group: apps
+      kind: Deployment
+      name: kubernetes-dashboard
+      version: v1
+  - path: virtual-service-patch.yaml
+    target:
+      group: networking.istio.io
+      kind: VirtualService
+      name: vs-kubernetes-dashboard
+      version: v1beta1

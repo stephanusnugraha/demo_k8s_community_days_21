@@ -1,0 +1,6 @@
+- op: replace
+  path: "/spec/gateways/0"
+  value: prod-ingress
+- op: replace
+  path: "/spec/hosts/0"
+  value: k8s-dashboard.k8s.local

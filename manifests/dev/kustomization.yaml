@@ -1,0 +1,10 @@
+commonLabels:
+  env: dev
+  project: demo
+
+resources:
+  - _dashboard
+  - _ingress
+  - app
+
+namespace: dev

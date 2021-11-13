@@ -1,0 +1,10 @@
+commonLabels:
+  env: prod
+  project: demo
+
+resources:
+  - _dashboard
+  - _ingress
+  - app
+
+namespace: prod

@@ -1,0 +1,6 @@
+- op: replace
+  path: "/spec/template/spec/containers/0/args/0"
+  value: "--namespace=dev"
+- op: replace
+  path: "/spec/template/spec/containers/0/args/1"
+  value: '--system-banner="This is dev namespace, please type in dev in the namespace below"'

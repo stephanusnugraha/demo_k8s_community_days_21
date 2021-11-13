@@ -1,0 +1,9 @@
+- op: replace
+  path: "/metadata/name"
+  value: "prod-ingress"
+- op: replace
+  path: "/spec/servers/0/hosts/0"
+  value: "*.k8s.local"
+- op: replace
+  path: "/spec/servers/0/port/name"
+  value: "prod-http"

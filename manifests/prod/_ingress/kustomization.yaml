@@ -1,0 +1,12 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base/_ingress
+
+patches:
+  - path: ingress-patch.yaml
+    target:
+      group: networking.istio.io
+      version: v1beta1
+      kind: Gateway
+      name: .*

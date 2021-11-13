@@ -1,0 +1,6 @@
+- op: replace
+  path: "/spec/template/spec/containers/0/args/0"
+  value: "--namespace=prod"
+- op: replace
+  path: "/spec/template/spec/containers/0/args/1"
+  value: '--system-banner="This is prod cluster, please type in prod in the namespace below"'

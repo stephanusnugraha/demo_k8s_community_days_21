@@ -1,0 +1,13 @@
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: vs-kubernetes-dashboard
+spec:
+  gateways:
+    - wcqris-ingress
+  hosts:
+    - k8s-dashboard.k8s.local
+  http:
+    - route:
+        - destination:
+            host: kubernetes-dashboard
