@@ -1,0 +1,29 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hello
+spec:
+  replicas: 1
+  revisionHistoryLimit: 0
+  template:
+    spec:
+      containers:
+        - name: hello
+          image: nginxdemos/hello
+          imagePullPolicy: Always
+          envFrom:
+            - configMapRef:
+                name: hello-configmap
+            # - secretRef:
+            #     name: hello-secret
+            #- secretRef:
+            #   name: global-secret
+          ports:
+            - containerPort: 80
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+            limits:
+              memory: "256Mi"
+              cpu: "200m"

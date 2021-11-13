@@ -1,0 +1,15 @@
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: vs-hello
+spec:
+  gateways:
+    - hello-ingress
+  hosts:
+    - hello.dev.k8s.local
+  http:
+    - route:
+        - destination:
+            host: hello
+            port:
+              number: 80

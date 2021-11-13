@@ -1,0 +1,21 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base/app
+
+configMapGenerator:
+  - envs:
+      - app.env
+    name: hello-configmap
+
+patches:
+  - path: virtual-service-patch.yaml
+    target:
+      group: networking.istio.io
+      kind: VirtualService
+      name: vs-hello
+      version: v1beta1
+images:
+  - name: hello
+    newName: nginxdemos/hello
+    newTag: latest
