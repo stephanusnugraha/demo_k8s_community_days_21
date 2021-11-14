@@ -18,4 +18,4 @@ patches:
 images:
   - name: hello
     newName: nginx
-    newTag: latest
+    newTag: alpine
