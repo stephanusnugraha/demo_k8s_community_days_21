@@ -3,10 +3,10 @@ kind: Kustomization
 resources:
   - ../../base/app
 
-configMapGenerator:
-  - name: demo-configmap
-    files:
-      - index.html
+# configMapGenerator:
+#   - name: demo-configmap
+#     files:
+#       - index.html
 
 patches:
   - path: virtual-service-patch.yaml
