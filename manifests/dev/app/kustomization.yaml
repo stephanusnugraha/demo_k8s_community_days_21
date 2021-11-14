@@ -15,7 +15,3 @@ patches:
       kind: VirtualService
       name: vs-hello
       version: v1beta1
-images:
-  - name: hello
-    newName: nginx
-    newTag: alpine
