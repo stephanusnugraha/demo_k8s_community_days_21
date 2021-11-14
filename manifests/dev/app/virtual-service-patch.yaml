@@ -3,4 +3,4 @@
   value: "hello.dev.k8s.local"
 - op: replace
   path: "/spec/gateways/0"
-  value: "hello-ingress"
+  value: "dev-ingress"
