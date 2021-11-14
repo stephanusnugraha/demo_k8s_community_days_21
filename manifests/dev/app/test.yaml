@@ -1,0 +1,81 @@
+apiVersion: v1
+data:
+  index.html: |-
+    <html>
+        <h1>Hi! This Dev Environment</h1>
+    </html>
+kind: ConfigMap
+metadata:
+  name: demo-configmap-mkf6h62mhk
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: hello
+    database: disabled
+  name: hello
+spec:
+  ports:
+  - port: 80
+    protocol: TCP
+    targetPort: 80
+  selector:
+    app: hello
+    database: disabled
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: hello
+    database: disabled
+  name: hello
+spec:
+  replicas: 1
+  revisionHistoryLimit: 0
+  selector:
+    matchLabels:
+      app: hello
+      database: disabled
+  template:
+    metadata:
+      labels:
+        app: hello
+        database: disabled
+    spec:
+      containers:
+      - envFrom:
+        - configMapRef:
+            name: hello-configmap
+        image: nginxdemos/hello
+        imagePullPolicy: Always
+        name: hello
+        ports:
+        - containerPort: 80
+        resources:
+          limits:
+            cpu: 200m
+            memory: 256Mi
+          requests:
+            cpu: 50m
+            memory: 64Mi
+---
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  labels:
+    app: hello
+    database: disabled
+  name: vs-hello
+spec:
+  gateways:
+  - hello-ingress
+  hosts:
+  - hello.dev.k8s.local
+  http:
+  - route:
+    - destination:
+        host: hello
+        port:
+          number: 80
