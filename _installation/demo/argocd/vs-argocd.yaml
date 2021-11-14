@@ -1,0 +1,16 @@
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: vs-argocd
+  namespace: argocd
+spec:
+  hosts:
+    - "argocd.devops.k8s.local"
+  gateways:
+    - default/demo-ingress
+  http:
+    - route:
+        - destination:
+            host: argocd-server
+            port:
+              number: 80
