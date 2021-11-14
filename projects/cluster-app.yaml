@@ -1,0 +1,20 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cluster-app
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/stephanusnugraha/demo_k8s_community_days_21.git
+    targetRevision: main
+    path: projects/demo
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: defeault
+  syncPolicy:
+    automated:
+      selfHeal: true
+      prune: true
