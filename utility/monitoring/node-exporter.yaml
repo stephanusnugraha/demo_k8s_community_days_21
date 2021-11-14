@@ -1,0 +1,110 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  annotations: {}
+  labels:
+    app: prometheus
+    chart: prometheus-13.2.1
+    component: node-exporter
+    heritage: Helm
+    release: prometheus
+  name: prometheus-prometheus-node-exporter
+  namespace: monitoring
+---
+apiVersion: v1
+kind: Service
+metadata:
+  annotations:
+    prometheus.io/scrape: "true"
+  labels:
+    app: prometheus
+    chart: prometheus-13.2.1
+    component: node-exporter
+    heritage: Helm
+    release: prometheus
+  name: prometheus-prometheus-node-exporter
+  namespace: monitoring
+spec:
+  clusterIP: None
+  ports:
+    - name: metrics
+      port: 9100
+      protocol: TCP
+      targetPort: 9100
+  selector:
+    app: prometheus
+    component: node-exporter
+    release: prometheus
+  type: ClusterIP
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  labels:
+    app: prometheus
+    chart: prometheus-13.2.1
+    component: node-exporter
+    heritage: Helm
+    release: prometheus
+  name: prometheus-prometheus-node-exporter
+  namespace: monitoring
+spec:
+  selector:
+    matchLabels:
+      app: prometheus
+      component: node-exporter
+      release: prometheus
+  template:
+    metadata:
+      labels:
+        app: prometheus
+        chart: prometheus-13.2.1
+        component: node-exporter
+        heritage: Helm
+        release: prometheus
+    spec:
+      containers:
+        - args:
+            - --path.procfs=/host/proc
+            - --path.sysfs=/host/sys
+            - --path.rootfs=/host/root
+            - --web.listen-address=:9100
+          image: quay.io/prometheus/node-exporter:v1.0.1
+          imagePullPolicy: IfNotPresent
+          name: prometheus-node-exporter
+          ports:
+            - containerPort: 9100
+              hostPort: 9100
+              name: metrics
+          resources: {}
+          volumeMounts:
+            - mountPath: /host/proc
+              name: proc
+              readOnly: true
+            - mountPath: /host/sys
+              name: sys
+              readOnly: true
+            - mountPath: /host/root
+              mountPropagation: HostToContainer
+              name: root
+              readOnly: true
+      hostNetwork: true
+      hostPID: true
+      securityContext:
+        fsGroup: 65534
+        runAsGroup: 65534
+        runAsNonRoot: true
+        runAsUser: 65534
+      serviceAccountName: prometheus-prometheus-node-exporter
+      volumes:
+        - hostPath:
+            path: /proc
+          name: proc
+        - hostPath:
+            path: /sys
+          name: sys
+        - hostPath:
+            path: /
+          name: root
+  updateStrategy:
+    type: RollingUpdate

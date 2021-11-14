@@ -1,0 +1,1126 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  annotations: {}
+  labels:
+    app: prometheus
+    chart: prometheus-13.6.0
+    component: server
+    heritage: Helm
+    release: prometheus
+  name: prometheus-server
+  namespace: monitoring
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app: prometheus
+    chart: prometheus-13.6.0
+    component: server
+    heritage: Helm
+    release: prometheus
+  name: prometheus-server
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - nodes
+      - nodes/proxy
+      - nodes/metrics
+      - services
+      - endpoints
+      - pods
+      - ingresses
+      - configmaps
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - extensions
+      - networking.k8s.io
+    resources:
+      - ingresses/status
+      - ingresses
+    verbs:
+      - get
+      - list
+      - watch
+  - nonResourceURLs:
+      - /metrics
+    verbs:
+      - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  labels:
+    app: prometheus
+    chart: prometheus-13.6.0
+    component: server
+    heritage: Helm
+    release: prometheus
+  name: prometheus-server
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: prometheus-server
+subjects:
+  - kind: ServiceAccount
+    name: prometheus-server
+    namespace: monitoring
+---
+apiVersion: v1
+data:
+  alerting_rules.yml: |
+    groups:
+    - name: argocd-rules
+      rules:
+      - alert: Trouble-Sync
+        annotations:
+          descriptions: '{{ $labels.instance }} of job {{ $labels.job }} has a trouble of Sync for 5 minutes.'
+          summary: 'App {{ $labels.name }} is not Sync'
+        expr: argocd_app_info == 0
+        for: 5m
+        labels:
+          severity: critical
+    - name: kubernetes-apps
+      rules:
+        - alert: KubePodCrashLooping
+          annotations:
+            description: Pod {{ $labels.namespace }}/{{ $labels.pod }} ({{ $labels.container }}) is restarting {{ printf "%.2f" $value }} times / 10 minutes.
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubepodcrashlooping
+            summary: Pod is crash looping.
+          expr: |
+            increase(kube_pod_container_status_restarts_total{job="kube-state-metrics"}[10m]) > 0
+            and
+            kube_pod_container_status_waiting{job="kube-state-metrics"} == 1
+          for: 15m
+          labels:
+            severity: warning
+        - alert: KubePodNotReady
+          annotations:
+            description: Pod {{ $labels.namespace }}/{{ $labels.pod }} has been in a non-ready state for longer than 15 minutes.
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubepodnotready
+            summary: Pod has been in a non-ready state for more than 15 minutes.
+          expr: |
+            sum by (namespace, pod) (
+              max by(namespace, pod) (
+                kube_pod_status_phase{job="kube-state-metrics", phase=~"Pending|Unknown"}
+              ) * on(namespace, pod) group_left(owner_kind) topk by(namespace, pod) (
+                1, max by(namespace, pod, owner_kind) (kube_pod_owner{owner_kind!="Job"})
+              )
+            ) > 0
+          for: 15m
+          labels:
+            severity: warning
+        - alert: KubeDeploymentGenerationMismatch
+          annotations:
+            description: Deployment generation for {{ $labels.namespace }}/{{ $labels.deployment }} does not match, this indicates that the Deployment has failed but has not been rolled back.
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubedeploymentgenerationmismatch
+            summary: Deployment generation mismatch due to possible roll-back
+          expr: |
+            kube_deployment_status_observed_generation{job="kube-state-metrics"}
+              !=
+            kube_deployment_metadata_generation{job="kube-state-metrics"}
+          for: 15m
+          labels:
+            severity: warning
+        - alert: KubeDeploymentReplicasMismatch
+          annotations:
+            description: Deployment {{ $labels.namespace }}/{{ $labels.deployment }} has not matched the expected number of replicas for longer than 15 minutes.
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubedeploymentreplicasmismatch
+            summary: Deployment has not matched the expected number of replicas.
+          expr: |
+            (
+              kube_deployment_spec_replicas{job="kube-state-metrics"}
+                >
+              kube_deployment_status_replicas_available{job="kube-state-metrics"}
+            ) and (
+              changes(kube_deployment_status_replicas_updated{job="kube-state-metrics"}[10m])
+                ==
+              0
+            )
+          for: 15m
+          labels:
+            severity: warning
+        - alert: KubeStatefulSetReplicasMismatch
+          annotations:
+            description: StatefulSet {{ $labels.namespace }}/{{ $labels.statefulset }} has not matched the expected number of replicas for longer than 15 minutes.
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubestatefulsetreplicasmismatch
+            summary: Deployment has not matched the expected number of replicas.
+          expr: |
+            (
+              kube_statefulset_status_replicas_ready{job="kube-state-metrics"}
+                !=
+              kube_statefulset_status_replicas{job="kube-state-metrics"}
+            ) and (
+              changes(kube_statefulset_status_replicas_updated{job="kube-state-metrics"}[10m])
+                ==
+              0
+            )
+          for: 15m
+          labels:
+            severity: warning
+        - alert: KubeStatefulSetGenerationMismatch
+          annotations:
+            description: StatefulSet generation for {{ $labels.namespace }}/{{ $labels.statefulset }} does not match, this indicates that the StatefulSet has failed but has not been rolled back.
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubestatefulsetgenerationmismatch
+            summary: StatefulSet generation mismatch due to possible roll-back
+          expr: |
+            kube_statefulset_status_observed_generation{job="kube-state-metrics"}
+              !=
+            kube_statefulset_metadata_generation{job="kube-state-metrics"}
+          for: 15m
+          labels:
+            severity: warning
+        - alert: KubeStatefulSetUpdateNotRolledOut
+          annotations:
+            description: StatefulSet {{ $labels.namespace }}/{{ $labels.statefulset }} update has not been rolled out.
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubestatefulsetupdatenotrolledout
+            summary: StatefulSet update has not been rolled out.
+          expr: |
+            (
+              max without (revision) (
+                kube_statefulset_status_current_revision{job="kube-state-metrics"}
+                  unless
+                kube_statefulset_status_update_revision{job="kube-state-metrics"}
+              )
+                *
+              (
+                kube_statefulset_replicas{job="kube-state-metrics"}
+                  !=
+                kube_statefulset_status_replicas_updated{job="kube-state-metrics"}
+              )
+            )  and (
+              changes(kube_statefulset_status_replicas_updated{job="kube-state-metrics"}[5m])
+                ==
+              0
+            )
+          for: 15m
+          labels:
+            severity: warning
+        - alert: KubeDaemonSetRolloutStuck
+          annotations:
+            description: DaemonSet {{ $labels.namespace }}/{{ $labels.daemonset }} has not finished or progressed for at least 15 minutes.
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubedaemonsetrolloutstuck
+            summary: DaemonSet rollout is stuck.
+          expr: |
+            (
+              (
+                kube_daemonset_status_current_number_scheduled{job="kube-state-metrics"}
+                 !=
+                kube_daemonset_status_desired_number_scheduled{job="kube-state-metrics"}
+              ) or (
+                kube_daemonset_status_number_misscheduled{job="kube-state-metrics"}
+                 !=
+                0
+              ) or (
+                kube_daemonset_updated_number_scheduled{job="kube-state-metrics"}
+                 !=
+                kube_daemonset_status_desired_number_scheduled{job="kube-state-metrics"}
+              ) or (
+                kube_daemonset_status_number_available{job="kube-state-metrics"}
+                 !=
+                kube_daemonset_status_desired_number_scheduled{job="kube-state-metrics"}
+              )
+            ) and (
+              changes(kube_daemonset_updated_number_scheduled{job="kube-state-metrics"}[5m])
+                ==
+              0
+            )
+          for: 15m
+          labels:
+            severity: warning
+        - alert: KubeContainerWaiting
+          annotations:
+            description: Pod {{ $labels.namespace }}/{{ $labels.pod }} container {{ $labels.container}} has been in waiting state for longer than 1 hour.
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubecontainerwaiting
+            summary: Pod container waiting longer than 1 hour
+          expr: |
+            sum by (namespace, pod, container) (kube_pod_container_status_waiting_reason{job="kube-state-metrics"}) > 0
+          for: 1h
+          labels:
+            severity: warning
+        - alert: KubeDaemonSetNotScheduled
+          annotations:
+            description: "{{ $value }} Pods of DaemonSet {{ $labels.namespace }}/{{ $labels.daemonset }} are not scheduled."
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubedaemonsetnotscheduled
+            summary: DaemonSet pods are not scheduled.
+          expr: |
+            kube_daemonset_status_desired_number_scheduled{job="kube-state-metrics"}
+              -
+            kube_daemonset_status_current_number_scheduled{job="kube-state-metrics"} > 0
+          for: 10m
+          labels:
+            severity: warning
+        - alert: KubeDaemonSetMisScheduled
+          annotations:
+            description: "{{ $value }} Pods of DaemonSet {{ $labels.namespace }}/{{ $labels.daemonset }} are running where they are not supposed to run."
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubedaemonsetmisscheduled
+            summary: DaemonSet pods are misscheduled.
+          expr: |
+            kube_daemonset_status_number_misscheduled{job="kube-state-metrics"} > 0
+          for: 15m
+          labels:
+            severity: warning
+        - alert: KubeJobCompletion
+          annotations:
+            description: Job {{ $labels.namespace }}/{{ $labels.job_name }} is taking more than 12 hours to complete.
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubejobcompletion
+            summary: Job did not complete in time
+          expr: |
+            kube_job_spec_completions{job="kube-state-metrics"} - kube_job_status_succeeded{job="kube-state-metrics"}  > 0
+          for: 12h
+          labels:
+            severity: warning
+        - alert: KubeJobFailed
+          annotations:
+            description: Job {{ $labels.namespace }}/{{ $labels.job_name }} failed to complete. Removing failed job after investigation should clear this alert.
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubejobfailed
+            summary: Job failed to complete.
+          expr: |
+            kube_job_failed{job="kube-state-metrics"}  > 0
+          for: 15m
+          labels:
+            severity: warning
+        - alert: KubeHpaReplicasMismatch
+          annotations:
+            description: HPA {{ $labels.namespace }}/{{ $labels.horizontalpodautoscaler  }} has not matched the desired number of replicas for longer than 15 minutes.
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubehpareplicasmismatch
+            summary: HPA has not matched descired number of replicas.
+          expr: |
+            (kube_horizontalpodautoscaler_status_desired_replicas{job="kube-state-metrics"}
+              !=
+            kube_horizontalpodautoscaler_status_current_replicas{job="kube-state-metrics"})
+              and
+            (kube_horizontalpodautoscaler_status_current_replicas{job="kube-state-metrics"}
+              >
+            kube_horizontalpodautoscaler_spec_min_replicas{job="kube-state-metrics"})
+              and
+            (kube_horizontalpodautoscaler_status_current_replicas{job="kube-state-metrics"}
+              <
+            kube_horizontalpodautoscaler_spec_max_replicas{job="kube-state-metrics"})
+              and
+            changes(kube_horizontalpodautoscaler_status_current_replicas{job="kube-state-metrics"}[15m]) == 0
+          for: 15m
+          labels:
+            severity: warning
+        - alert: KubeHpaMaxedOut
+          annotations:
+            description: HPA {{ $labels.namespace }}/{{ $labels.horizontalpodautoscaler  }} has been running at max replicas for longer than 15 minutes.
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubehpamaxedout
+            summary: HPA is running at max replicas
+          expr: |
+            kube_horizontalpodautoscaler_status_current_replicas{job="kube-state-metrics"}
+              ==
+            kube_horizontalpodautoscaler_spec_max_replicas{job="kube-state-metrics"}
+          for: 15m
+          labels:
+            severity: warning
+    - name: kubernetes-resources
+      rules:
+        - alert: KubeCPUOvercommit
+          annotations:
+            description: Cluster has overcommitted CPU resource requests for Pods by {{ $value }} CPU shares and cannot tolerate node failure.
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubecpuovercommit
+            summary: Cluster has overcommitted CPU resource requests.
+          expr: |
+            sum(namespace_cpu:kube_pod_container_resource_requests:sum{}) - (sum(kube_node_status_allocatable{resource="cpu"}) - max(kube_node_status_allocatable{resource="cpu"})) > 0
+            and
+            (sum(kube_node_status_allocatable{resource="cpu"}) - max(kube_node_status_allocatable{resource="cpu"})) > 0
+          for: 10m
+          labels:
+            severity: warning
+        - alert: KubeMemoryOvercommit
+          annotations:
+            description: Cluster has overcommitted memory resource requests for Pods by {{ $value }} bytes and cannot tolerate node failure.
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubememoryovercommit
+            summary: Cluster has overcommitted memory resource requests.
+          expr: |
+            sum(namespace_memory:kube_pod_container_resource_requests:sum{}) - (sum(kube_node_status_allocatable{resource="memory"}) - max(kube_node_status_allocatable{resource="memory"})) > 0
+            and
+            (sum(kube_node_status_allocatable{resource="memory"}) - max(kube_node_status_allocatable{resource="memory"})) > 0
+          for: 10m
+          labels:
+            severity: warning
+        - alert: KubeCPUQuotaOvercommit
+          annotations:
+            description: Cluster has overcommitted CPU resource requests for Namespaces.
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubecpuquotaovercommit
+            summary: Cluster has overcommitted CPU resource requests.
+          expr: |
+            sum(kube_resourcequota{job="kube-state-metrics", type="hard", resource="cpu"})
+              /
+            sum(kube_node_status_allocatable{resource="cpu"})
+              > 1.5
+          for: 5m
+          labels:
+            severity: warning
+        - alert: KubeMemoryQuotaOvercommit
+          annotations:
+            description: Cluster has overcommitted memory resource requests for Namespaces.
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubememoryquotaovercommit
+            summary: Cluster has overcommitted memory resource requests.
+          expr: |
+            sum(kube_resourcequota{job="kube-state-metrics", type="hard", resource="memory"})
+              /
+            sum(kube_node_status_allocatable{resource="memory",job="kube-state-metrics"})
+              > 1.5
+          for: 5m
+          labels:
+            severity: warning
+        - alert: KubeQuotaAlmostFull
+          annotations:
+            description: Namespace {{ $labels.namespace }} is using {{ $value | humanizePercentage }} of its {{ $labels.resource }} quota.
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubequotaalmostfull
+            summary: Namespace quota is going to be full.
+          expr: |
+            kube_resourcequota{job="kube-state-metrics", type="used"}
+              / ignoring(instance, job, type)
+            (kube_resourcequota{job="kube-state-metrics", type="hard"} > 0)
+              > 0.9 < 1
+          for: 15m
+          labels:
+            severity: info
+        - alert: KubeQuotaFullyUsed
+          annotations:
+            description: Namespace {{ $labels.namespace }} is using {{ $value | humanizePercentage }} of its {{ $labels.resource }} quota.
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubequotafullyused
+            summary: Namespace quota is fully used.
+          expr: |
+            kube_resourcequota{job="kube-state-metrics", type="used"}
+              / ignoring(instance, job, type)
+            (kube_resourcequota{job="kube-state-metrics", type="hard"} > 0)
+              == 1
+          for: 15m
+          labels:
+            severity: info
+        - alert: KubeQuotaExceeded
+          annotations:
+            description: Namespace {{ $labels.namespace }} is using {{ $value | humanizePercentage }} of its {{ $labels.resource }} quota.
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubequotaexceeded
+            summary: Namespace quota has exceeded the limits.
+          expr: |
+            kube_resourcequota{job="kube-state-metrics", type="used"}
+              / ignoring(instance, job, type)
+            (kube_resourcequota{job="kube-state-metrics", type="hard"} > 0)
+              > 1
+          for: 15m
+          labels:
+            severity: warning
+        - alert: CPUThrottlingHigh
+          annotations:
+            description: "{{ $value | humanizePercentage }} throttling of CPU in namespace {{ $labels.namespace }} for container {{ $labels.container }} in pod {{ $labels.pod }}."
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/cputhrottlinghigh
+            summary: Processes experience elevated CPU throttling.
+          expr: |
+            sum(increase(container_cpu_cfs_throttled_periods_total{container!="", }[5m])) by (container, pod, namespace)
+              /
+            sum(increase(container_cpu_cfs_periods_total{}[5m])) by (container, pod, namespace)
+              > ( 25 / 100 )
+          for: 15m
+          labels:
+            severity: info
+    - name: kubernetes-storage
+      rules:
+        - alert: KubePersistentVolumeFillingUp
+          annotations:
+            description: The PersistentVolume claimed by {{ $labels.persistentvolumeclaim }} in Namespace {{ $labels.namespace }} is only {{ $value | humanizePercentage }} free.
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubepersistentvolumefillingup
+            summary: PersistentVolume is filling up.
+          expr: |
+            (
+              kubelet_volume_stats_available_bytes{job="kubelet", metrics_path="/metrics"}
+                /
+              kubelet_volume_stats_capacity_bytes{job="kubelet", metrics_path="/metrics"}
+            ) < 0.03
+            and
+            kubelet_volume_stats_used_bytes{job="kubelet", metrics_path="/metrics"} > 0
+          for: 1m
+          labels:
+            severity: critical
+        - alert: KubePersistentVolumeFillingUp
+          annotations:
+            description: Based on recent sampling, the PersistentVolume claimed by {{ $labels.persistentvolumeclaim }} in Namespace {{ $labels.namespace }} is expected to fill up within four days. Currently {{ $value | humanizePercentage }} is available.
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubepersistentvolumefillingup
+            summary: PersistentVolume is filling up.
+          expr: |
+            (
+              kubelet_volume_stats_available_bytes{job="kubelet", metrics_path="/metrics"}
+                /
+              kubelet_volume_stats_capacity_bytes{job="kubelet", metrics_path="/metrics"}
+            ) < 0.15
+            and
+            kubelet_volume_stats_used_bytes{job="kubelet", metrics_path="/metrics"} > 0
+            and
+            predict_linear(kubelet_volume_stats_available_bytes{job="kubelet", metrics_path="/metrics"}[6h], 4 * 24 * 3600) < 0
+          for: 1h
+          labels:
+            severity: warning
+        - alert: KubePersistentVolumeErrors
+          annotations:
+            description: The persistent volume {{ $labels.persistentvolume }} has status {{ $labels.phase }}.
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubepersistentvolumeerrors
+            summary: PersistentVolume is having issues with provisioning.
+          expr: |
+            kube_persistentvolume_status_phase{phase=~"Failed|Pending",job="kube-state-metrics"} > 0
+          for: 5m
+          labels:
+            severity: critical
+    - name: kubernetes-system
+      rules:
+        - alert: KubeVersionMismatch
+          annotations:
+            description: There are {{ $value }} different semantic versions of Kubernetes components running.
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubeversionmismatch
+            summary: Different semantic versions of Kubernetes components running.
+          expr: |
+            count(count by (git_version) (label_replace(kubernetes_build_info{job!~"kube-dns|coredns"},"git_version","$1","git_version","(v[0-9]*.[0-9]*).*"))) > 1
+          for: 15m
+          labels:
+            severity: warning
+        - alert: KubeClientErrors
+          annotations:
+            description: Kubernetes API server client '{{ $labels.job }}/{{ $labels.instance }}' is experiencing {{ $value | humanizePercentage }} errors.'
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubeclienterrors
+            summary: Kubernetes API server client is experiencing errors.
+          expr: |
+            (sum(rate(rest_client_requests_total{code=~"5.."}[5m])) by (instance, job, namespace)
+              /
+            sum(rate(rest_client_requests_total[5m])) by (instance, job, namespace))
+            > 0.01
+          for: 15m
+          labels:
+            severity: warning
+    - name: kube-apiserver-slos
+      rules:
+        - alert: KubeAPIErrorBudgetBurn
+          annotations:
+            description: The API server is burning too much error budget.
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubeapierrorbudgetburn
+            summary: The API server is burning too much error budget.
+          expr: |
+            sum(apiserver_request:burnrate1h) > (14.40 * 0.01000)
+            and
+            sum(apiserver_request:burnrate5m) > (14.40 * 0.01000)
+          for: 2m
+          labels:
+            long: 1h
+            severity: critical
+            short: 5m
+        - alert: KubeAPIErrorBudgetBurn
+          annotations:
+            description: The API server is burning too much error budget.
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubeapierrorbudgetburn
+            summary: The API server is burning too much error budget.
+          expr: |
+            sum(apiserver_request:burnrate6h) > (6.00 * 0.01000)
+            and
+            sum(apiserver_request:burnrate30m) > (6.00 * 0.01000)
+          for: 15m
+          labels:
+            long: 6h
+            severity: critical
+            short: 30m
+        - alert: KubeAPIErrorBudgetBurn
+          annotations:
+            description: The API server is burning too much error budget.
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubeapierrorbudgetburn
+            summary: The API server is burning too much error budget.
+          expr: |
+            sum(apiserver_request:burnrate1d) > (3.00 * 0.01000)
+            and
+            sum(apiserver_request:burnrate2h) > (3.00 * 0.01000)
+          for: 1h
+          labels:
+            long: 1d
+            severity: warning
+            short: 2h
+        - alert: KubeAPIErrorBudgetBurn
+          annotations:
+            description: The API server is burning too much error budget.
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubeapierrorbudgetburn
+            summary: The API server is burning too much error budget.
+          expr: |
+            sum(apiserver_request:burnrate3d) > (1.00 * 0.01000)
+            and
+            sum(apiserver_request:burnrate6h) > (1.00 * 0.01000)
+          for: 3h
+          labels:
+            long: 3d
+            severity: warning
+            short: 6h
+    - name: kubernetes-system-apiserver
+      rules:
+        - alert: KubeClientCertificateExpiration
+          annotations:
+            description: A client certificate used to authenticate to the apiserver is expiring in less than 7.0 days.
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubeclientcertificateexpiration
+            summary: Client certificate is about to expire.
+          expr: |
+            apiserver_client_certificate_expiration_seconds_count{job="apiserver"} > 0 and on(job) histogram_quantile(0.01, sum by (job, le) (rate(apiserver_client_certificate_expiration_seconds_bucket{job="apiserver"}[5m]))) < 604800
+          labels:
+            severity: warning
+        - alert: KubeClientCertificateExpiration
+          annotations:
+            description: A client certificate used to authenticate to the apiserver is expiring in less than 24.0 hours.
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubeclientcertificateexpiration
+            summary: Client certificate is about to expire.
+          expr: |
+            apiserver_client_certificate_expiration_seconds_count{job="apiserver"} > 0 and on(job) histogram_quantile(0.01, sum by (job, le) (rate(apiserver_client_certificate_expiration_seconds_bucket{job="apiserver"}[5m]))) < 86400
+          labels:
+            severity: critical
+        - alert: AggregatedAPIErrors
+          annotations:
+            description: An aggregated API {{ $labels.name }}/{{ $labels.namespace }} has reported errors. It has appeared unavailable {{ $value | humanize }} times averaged over the past 10m.
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/aggregatedapierrors
+            summary: An aggregated API has reported errors.
+          expr: |
+            sum by(name, namespace)(increase(aggregator_unavailable_apiservice_total[10m])) > 4
+          labels:
+            severity: warning
+        - alert: AggregatedAPIDown
+          annotations:
+            description: An aggregated API {{ $labels.name }}/{{ $labels.namespace }} has been only {{ $value | humanize }}% available over the last 10m.
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/aggregatedapidown
+            summary: An aggregated API is down.
+          expr: |
+            (1 - max by(name, namespace)(avg_over_time(aggregator_unavailable_apiservice[10m]))) * 100 < 85
+          for: 5m
+          labels:
+            severity: warning
+        - alert: KubeAPITerminatedRequests
+          annotations:
+            description: The apiserver has terminated {{ $value | humanizePercentage }} of its incoming requests.
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubeapiterminatedrequests
+            summary: The apiserver has terminated {{ $value | humanizePercentage }} of its incoming requests.
+          expr: |
+            sum(rate(apiserver_request_terminations_total{job="apiserver"}[10m]))  / (  sum(rate(apiserver_request_total{job="apiserver"}[10m])) + sum(rate(apiserver_request_terminations_total{job="apiserver"}[10m])) ) > 0.20
+          for: 5m
+          labels:
+            severity: warning
+    - name: kubernetes-system-kubelet
+      rules:
+        - alert: KubeNodeNotReady
+          annotations:
+            description: "{{ $labels.node }} has been unready for more than 15 minutes."
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubenodenotready
+            summary: Node is not ready.
+          expr: |
+            kube_node_status_condition{job="kube-state-metrics",condition="Ready",status="true"} == 0
+          for: 15m
+          labels:
+            severity: warning
+        - alert: KubeNodeUnreachable
+          annotations:
+            description: "{{ $labels.node }} is unreachable and some workloads may be rescheduled."
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubenodeunreachable
+            summary: Node is unreachable.
+          expr: |
+            (kube_node_spec_taint{job="kube-state-metrics",key="node.kubernetes.io/unreachable",effect="NoSchedule"} unless ignoring(key,value) kube_node_spec_taint{job="kube-state-metrics",key=~"ToBeDeletedByClusterAutoscaler|cloud.google.com/impending-node-termination|aws-node-termination-handler/spot-itn"}) == 1
+          for: 15m
+          labels:
+            severity: warning
+        - alert: KubeletTooManyPods
+          annotations:
+            description: Kubelet '{{ $labels.node }}' is running at {{ $value | humanizePercentage }} of its Pod capacity.
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubelettoomanypods
+            summary: Kubelet is running at capacity.
+          expr: |
+            count by(node) (
+              (kube_pod_status_phase{job="kube-state-metrics",phase="Running"} == 1) * on(instance,pod,namespace,cluster) group_left(node) topk by(instance,pod,namespace,cluster) (1, kube_pod_info{job="kube-state-metrics"})
+            )
+            /
+            max by(node) (
+              kube_node_status_capacity{job="kube-state-metrics",resource="pods"} != 1
+            ) > 0.95
+          for: 15m
+          labels:
+            severity: info
+        - alert: KubeNodeReadinessFlapping
+          annotations:
+            description: The readiness status of node {{ $labels.node }} has changed {{ $value }} times in the last 15 minutes.
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubenodereadinessflapping
+            summary: Node readiness status is flapping.
+          expr: |
+            sum(changes(kube_node_status_condition{status="true",condition="Ready"}[15m])) by (node) > 2
+          for: 15m
+          labels:
+            severity: warning
+        - alert: KubeletPlegDurationHigh
+          annotations:
+            description: The Kubelet Pod Lifecycle Event Generator has a 99th percentile duration of {{ $value }} seconds on node {{ $labels.node }}.
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubeletplegdurationhigh
+            summary: Kubelet Pod Lifecycle Event Generator is taking too long to relist.
+          expr: |
+            node_quantile:kubelet_pleg_relist_duration_seconds:histogram_quantile{quantile="0.99"} >= 10
+          for: 5m
+          labels:
+            severity: warning
+        - alert: KubeletPodStartUpLatencyHigh
+          annotations:
+            description: Kubelet Pod startup 99th percentile latency is {{ $value }} seconds on node {{ $labels.node }}.
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubeletpodstartuplatencyhigh
+            summary: Kubelet Pod startup latency is too high.
+          expr: |
+            histogram_quantile(0.99, sum(rate(kubelet_pod_worker_duration_seconds_bucket{job="kubelet", metrics_path="/metrics"}[5m])) by (instance, le)) * on(instance) group_left(node) kubelet_node_name{job="kubelet", metrics_path="/metrics"} > 60
+          for: 15m
+          labels:
+            severity: warning
+    - name: general-rules
+      rules:
+      - alert: InstanceDown
+        annotations:
+          description: '{{ $labels.instance }} of job {{ $labels.job }} has been down
+            for more than 5 minutes.'
+          summary: Instance {{ $labels.instance }} down
+        expr: up == 0
+        for: 5m
+        labels:
+          severity: critical
+      - alert: DiskSpaceFree10Percent
+        annotations:
+          description: '[{{ $labels.instance }}] has only {{ $value }}% or less free.'
+          summary: Instance [{{ $labels.instance }}] has 10% or less Free disk space
+        expr: node_filesystem_free_percent <= 10
+        labels:
+          severity: critical
+  alerts: |
+    {}
+  prometheus.yml: |
+    global:
+      evaluation_interval: 1m
+      scrape_interval: 1m
+      scrape_timeout: 10s
+    rule_files:
+    - /etc/config/recording_rules.yml
+    - /etc/config/alerting_rules.yml
+    - /etc/config/rules
+    - /etc/config/alerts
+    scrape_configs:
+    - job_name: 'sonarqube'
+      metrics_path: '/api/prometheus/metrics'
+      static_configs:
+      - targets: ['sonarqube-sonarqube:9000']
+    - job_name: argocd
+      static_configs:
+      - targets:
+        - argocd-metrics.argocd.svc.cluster.local:8082
+        - argocd-server-metrics.argocd.svc.cluster.local:8083
+        - argocd-repo-server.argocd.svc.cluster.local:8084
+      metrics_path: "/metrics"
+      scheme: http
+      bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+    - job_name: prometheus
+      static_configs:
+      - targets:
+        - localhost:9090
+    - bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+      job_name: kubernetes-apiservers
+      kubernetes_sd_configs:
+      - role: endpoints
+      relabel_configs:
+      - action: keep
+        regex: default;kubernetes;https
+        source_labels:
+        - __meta_kubernetes_namespace
+        - __meta_kubernetes_service_name
+        - __meta_kubernetes_endpoint_port_name
+      scheme: https
+      tls_config:
+        ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        insecure_skip_verify: true
+    - bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+      job_name: kubernetes-nodes
+      kubernetes_sd_configs:
+      - role: node
+      relabel_configs:
+      - action: labelmap
+        regex: __meta_kubernetes_node_label_(.+)
+      - replacement: kubernetes.default.svc:443
+        target_label: __address__
+      - regex: (.+)
+        replacement: /api/v1/nodes/$1/proxy/metrics
+        source_labels:
+        - __meta_kubernetes_node_name
+        target_label: __metrics_path__
+      scheme: https
+      tls_config:
+        ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        insecure_skip_verify: true
+    - bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+      job_name: kubernetes-nodes-cadvisor
+      kubernetes_sd_configs:
+      - role: node
+      relabel_configs:
+      - action: labelmap
+        regex: __meta_kubernetes_node_label_(.+)
+      - replacement: kubernetes.default.svc:443
+        target_label: __address__
+      - regex: (.+)
+        replacement: /api/v1/nodes/$1/proxy/metrics/cadvisor
+        source_labels:
+        - __meta_kubernetes_node_name
+        target_label: __metrics_path__
+      scheme: https
+      tls_config:
+        ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        insecure_skip_verify: true
+    - job_name: kubernetes-service-endpoints
+      kubernetes_sd_configs:
+      - role: endpoints
+      relabel_configs:
+      - action: keep
+        regex: true
+        source_labels:
+        - __meta_kubernetes_service_annotation_prometheus_io_scrape
+      - action: replace
+        regex: (https?)
+        source_labels:
+        - __meta_kubernetes_service_annotation_prometheus_io_scheme
+        target_label: __scheme__
+      - action: replace
+        regex: (.+)
+        source_labels:
+        - __meta_kubernetes_service_annotation_prometheus_io_path
+        target_label: __metrics_path__
+      - action: replace
+        regex: ([^:]+)(?::\d+)?;(\d+)
+        replacement: $1:$2
+        source_labels:
+        - __address__
+        - __meta_kubernetes_service_annotation_prometheus_io_port
+        target_label: __address__
+      - action: labelmap
+        regex: __meta_kubernetes_service_label_(.+)
+      - action: replace
+        source_labels:
+        - __meta_kubernetes_namespace
+        target_label: kubernetes_namespace
+      - action: replace
+        source_labels:
+        - __meta_kubernetes_service_name
+        target_label: kubernetes_name
+      - action: replace
+        source_labels:
+        - __meta_kubernetes_pod_node_name
+        target_label: kubernetes_node
+    - job_name: kubernetes-service-endpoints-slow
+      kubernetes_sd_configs:
+      - role: endpoints
+      relabel_configs:
+      - action: keep
+        regex: true
+        source_labels:
+        - __meta_kubernetes_service_annotation_prometheus_io_scrape_slow
+      - action: replace
+        regex: (https?)
+        source_labels:
+        - __meta_kubernetes_service_annotation_prometheus_io_scheme
+        target_label: __scheme__
+      - action: replace
+        regex: (.+)
+        source_labels:
+        - __meta_kubernetes_service_annotation_prometheus_io_path
+        target_label: __metrics_path__
+      - action: replace
+        regex: ([^:]+)(?::\d+)?;(\d+)
+        replacement: $1:$2
+        source_labels:
+        - __address__
+        - __meta_kubernetes_service_annotation_prometheus_io_port
+        target_label: __address__
+      - action: labelmap
+        regex: __meta_kubernetes_service_label_(.+)
+      - action: replace
+        source_labels:
+        - __meta_kubernetes_namespace
+        target_label: kubernetes_namespace
+      - action: replace
+        source_labels:
+        - __meta_kubernetes_service_name
+        target_label: kubernetes_name
+      - action: replace
+        source_labels:
+        - __meta_kubernetes_pod_node_name
+        target_label: kubernetes_node
+      scrape_interval: 5m
+      scrape_timeout: 30s
+    - honor_labels: true
+      job_name: prometheus-pushgateway
+      kubernetes_sd_configs:
+      - role: service
+      relabel_configs:
+      - action: keep
+        regex: pushgateway
+        source_labels:
+        - __meta_kubernetes_service_annotation_prometheus_io_probe
+    - job_name: kubernetes-services
+      kubernetes_sd_configs:
+      - role: service
+      metrics_path: /probe
+      params:
+        module:
+        - http_2xx
+      relabel_configs:
+      - action: keep
+        regex: true
+        source_labels:
+        - __meta_kubernetes_service_annotation_prometheus_io_probe
+      - source_labels:
+        - __address__
+        target_label: __param_target
+      - replacement: blackbox
+        target_label: __address__
+      - source_labels:
+        - __param_target
+        target_label: instance
+      - action: labelmap
+        regex: __meta_kubernetes_service_label_(.+)
+      - source_labels:
+        - __meta_kubernetes_namespace
+        target_label: kubernetes_namespace
+      - source_labels:
+        - __meta_kubernetes_service_name
+        target_label: kubernetes_name
+    - job_name: kubernetes-pods
+      kubernetes_sd_configs:
+      - role: pod
+      relabel_configs:
+      - action: keep
+        regex: true
+        source_labels:
+        - __meta_kubernetes_pod_annotation_prometheus_io_scrape
+      - action: replace
+        regex: (https?)
+        source_labels:
+        - __meta_kubernetes_pod_annotation_prometheus_io_scheme
+        target_label: __scheme__
+      - action: replace
+        regex: (.+)
+        source_labels:
+        - __meta_kubernetes_pod_annotation_prometheus_io_path
+        target_label: __metrics_path__
+      - action: replace
+        regex: ([^:]+)(?::\d+)?;(\d+)
+        replacement: $1:$2
+        source_labels:
+        - __address__
+        - __meta_kubernetes_pod_annotation_prometheus_io_port
+        target_label: __address__
+      - action: labelmap
+        regex: __meta_kubernetes_pod_label_(.+)
+      - action: replace
+        source_labels:
+        - __meta_kubernetes_namespace
+        target_label: kubernetes_namespace
+      - action: replace
+        source_labels:
+        - __meta_kubernetes_pod_name
+        target_label: kubernetes_pod_name
+      - action: drop
+        regex: Pending|Succeeded|Failed
+        source_labels:
+        - __meta_kubernetes_pod_phase
+    - job_name: kubernetes-pods-slow
+      kubernetes_sd_configs:
+      - role: pod
+      relabel_configs:
+      - action: keep
+        regex: true
+        source_labels:
+        - __meta_kubernetes_pod_annotation_prometheus_io_scrape_slow
+      - action: replace
+        regex: (https?)
+        source_labels:
+        - __meta_kubernetes_pod_annotation_prometheus_io_scheme
+        target_label: __scheme__
+      - action: replace
+        regex: (.+)
+        source_labels:
+        - __meta_kubernetes_pod_annotation_prometheus_io_path
+        target_label: __metrics_path__
+      - action: replace
+        regex: ([^:]+)(?::\d+)?;(\d+)
+        replacement: $1:$2
+        source_labels:
+        - __address__
+        - __meta_kubernetes_pod_annotation_prometheus_io_port
+        target_label: __address__
+      - action: labelmap
+        regex: __meta_kubernetes_pod_label_(.+)
+      - action: replace
+        source_labels:
+        - __meta_kubernetes_namespace
+        target_label: kubernetes_namespace
+      - action: replace
+        source_labels:
+        - __meta_kubernetes_pod_name
+        target_label: kubernetes_pod_name
+      - action: drop
+        regex: Pending|Succeeded|Failed
+        source_labels:
+        - __meta_kubernetes_pod_phase
+      scrape_interval: 5m
+      scrape_timeout: 30s
+    alerting:
+      alertmanagers:
+      - static_configs:
+        - targets:
+          - 'alertmanager:9093'
+      - kubernetes_sd_configs:
+          - role: pod
+        tls_config:
+          ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        relabel_configs:
+        - source_labels: [__meta_kubernetes_namespace]
+          regex: devops
+          action: keep
+        - source_labels: [__meta_kubernetes_pod_label_app]
+          regex: prometheus
+          action: keep
+        - source_labels: [__meta_kubernetes_pod_label_component]
+          regex: alertmanager
+          action: keep
+        - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_probe]
+          regex: .*
+          action: keep
+        - source_labels: [__meta_kubernetes_pod_container_port_number]
+          regex: "9093"
+          action: keep
+  recording_rules.yml: |
+    {}
+  rules: |
+    {}
+kind: ConfigMap
+metadata:
+  labels:
+    app: prometheus
+    chart: prometheus-13.6.0
+    component: server
+    heritage: Helm
+    release: prometheus
+  name: prometheus-server
+  namespace: monitoring
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: prometheus
+    chart: prometheus-13.6.0
+    component: server
+    heritage: Helm
+    release: prometheus
+  name: prometheus-server
+  namespace: monitoring
+spec:
+  ports:
+    - name: http
+      port: 9090
+      protocol: TCP
+      targetPort: 9090
+  selector:
+    app: prometheus
+    component: server
+    release: prometheus
+  sessionAffinity: None
+  type: ClusterIP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: prometheus
+    chart: prometheus-13.6.0
+    component: server
+    heritage: Helm
+    release: prometheus
+  name: prometheus-server
+  namespace: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: prometheus
+      component: server
+      release: prometheus
+  template:
+    metadata:
+      annotations:
+        sidecar.istio.io/inject: "false"
+      labels:
+        app: prometheus
+        chart: prometheus-13.6.0
+        component: server
+        heritage: Helm
+        release: prometheus
+    spec:
+      containers:
+        - args:
+            - --volume-dir=/etc/config
+            - --webhook-url=http://127.0.0.1:9090/-/reload
+          image: jimmidyson/configmap-reload:v0.5.0
+          imagePullPolicy: IfNotPresent
+          name: prometheus-server-configmap-reload
+          resources: {}
+          volumeMounts:
+            - mountPath: /etc/config
+              name: config-volume
+              readOnly: true
+        - args:
+            - --storage.tsdb.retention.time=15d
+            - --config.file=/etc/config/prometheus.yml
+            - --storage.tsdb.path=/data
+            - --web.console.libraries=/etc/prometheus/console_libraries
+            - --web.console.templates=/etc/prometheus/consoles
+            - --web.enable-lifecycle
+          image: quay.io/prometheus/prometheus:v2.26.0
+          imagePullPolicy: IfNotPresent
+          livenessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /-/healthy
+              port: 9090
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            successThreshold: 1
+            timeoutSeconds: 10
+          name: prometheus-server
+          ports:
+            - containerPort: 9090
+          readinessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /-/ready
+              port: 9090
+            initialDelaySeconds: 30
+            periodSeconds: 5
+            successThreshold: 1
+            timeoutSeconds: 4
+          resources: {}
+          volumeMounts:
+            - mountPath: /etc/config
+              name: config-volume
+            - mountPath: /data
+              name: storage-volume
+              subPath: ""
+      dnsPolicy: ClusterFirst
+      hostNetwork: false
+      securityContext:
+        fsGroup: 65534
+        runAsGroup: 65534
+        runAsNonRoot: true
+        runAsUser: 65534
+      serviceAccountName: prometheus-server
+      terminationGracePeriodSeconds: 300
+      volumes:
+        - configMap:
+            name: prometheus-server
+          name: config-volume
+        - name: storage-volume
+          persistentVolumeClaim:
+            claimName: prometheus-server

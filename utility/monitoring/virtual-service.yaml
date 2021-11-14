@@ -1,0 +1,31 @@
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: vs-prometheus
+spec:
+  hosts:
+    - prometheus-k8s.local
+  gateways:
+    - default/devops-ingress
+  http:
+    - route:
+        - destination:
+            host: prometheus-server
+            port:
+              number: 9090
+---
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: vs-grafana
+spec:
+  hosts:
+    - grafana-k8s.local
+  gateways:
+    - default/devops-ingress
+  http:
+    - route:
+        - destination:
+            host: grafana
+            port:
+              number: 80
