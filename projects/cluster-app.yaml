@@ -13,7 +13,7 @@ spec:
     path: projects/demo
   destination:
     server: https://kubernetes.default.svc
-    namespace: defeault
+    namespace: default
   syncPolicy:
     automated:
       selfHeal: true

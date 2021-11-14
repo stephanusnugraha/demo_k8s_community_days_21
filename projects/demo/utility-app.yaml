@@ -1,19 +1,18 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: demo-dev-app
+  name: utility-app
   namespace: argocd
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
-  project: demo-project
+  project: default
   source:
     repoURL: https://github.com/stephanusnugraha/demo_k8s_community_days_21.git
     targetRevision: main
-    path: manifests/dev
+    path: utiliy/demo
   destination:
     server: https://kubernetes.default.svc
-    namespace: demo-dev
   syncPolicy:
     automated:
       selfHeal: true
