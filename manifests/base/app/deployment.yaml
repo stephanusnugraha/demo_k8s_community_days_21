@@ -9,7 +9,7 @@ spec:
     spec:
       containers:
         - name: hello
-          image: nginx:alpine
+          image: nginx
           imagePullPolicy: Always
           ports:
             - containerPort: 80
