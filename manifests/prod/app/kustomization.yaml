@@ -4,9 +4,9 @@ resources:
   - ../../base/app
 
 configMapGenerator:
-  - envs:
-      - app.env
-    name: hello-configmap
+  - name: demo-configmap
+    files:
+      - index.html
 
 patches:
   - path: virtual-service-patch.yaml
@@ -15,7 +15,3 @@ patches:
       kind: VirtualService
       name: vs-hello
       version: v1beta1
-images:
-  - name: hello
-    newName: nginxdemos/hello
-    newTag: latest

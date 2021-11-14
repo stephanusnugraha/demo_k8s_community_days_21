@@ -10,10 +10,10 @@ spec:
   source:
     repoURL: https://github.com/stephanusnugraha/demo_k8s_community_days_21.git
     targetRevision: main
-    path: manifests/dev
+    path: manifests/prod
   destination:
     server: https://kubernetes.default.svc
-    namespace: dev
+    namespace: prod
   syncPolicy:
     automated:
       selfHeal: true
