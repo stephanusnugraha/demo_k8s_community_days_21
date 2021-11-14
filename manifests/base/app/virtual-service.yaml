@@ -4,7 +4,7 @@ metadata:
   name: vs-hello
 spec:
   gateways:
-    - hello-ingress
+    - dev-ingress
   hosts:
     - hello.dev.k8s.local
   http:
