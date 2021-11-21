@@ -6,7 +6,7 @@ spec:
   hosts:
     - prometheus-k8s.local
   gateways:
-    - default/devops-ingress
+    - demo-ingress
   http:
     - route:
         - destination:
@@ -22,7 +22,7 @@ spec:
   hosts:
     - grafana-k8s.local
   gateways:
-    - default/devops-ingress
+    - demo-ingress
   http:
     - route:
         - destination:
