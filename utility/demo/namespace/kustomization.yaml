@@ -3,3 +3,4 @@ kind: Kustomization
 resources:
   - dev-ns.yaml
   - prod-ns.yaml
+  - monitoring-ns.yaml
