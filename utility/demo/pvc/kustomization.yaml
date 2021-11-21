@@ -1,0 +1,5 @@
+resources:
+  - prometheus-server-pvc.yaml
+  - grafana-pvc.yaml
+
+namespace: monitoring
