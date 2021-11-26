@@ -4,7 +4,7 @@ metadata:
   name: vs-prometheus
 spec:
   hosts:
-    - prometheus-k8s.local
+    - prometheus.devops.k8s.local
   gateways:
     - demo-ingress
   http:
@@ -20,7 +20,7 @@ metadata:
   name: vs-grafana
 spec:
   hosts:
-    - grafana-k8s.local
+    - grafana.devops.k8s.local
   gateways:
     - demo-ingress
   http:
